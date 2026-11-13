@@ -53,13 +53,30 @@ Movement:AddSlider("JumpPower", {
     Title = "Jump Power", Min = 50, Max = 300, Default = 50, Increment = 5,
 })
 
-local defaults = { WalkSpeed = 16, JumpPower = 50 }
+-- Only touch the humanoid when a toggle is on; remember the game's own values to restore them.
+local original = {}
 local function applyStats()
     local hum = getHumanoid()
     if not hum then return end
-    hum.WalkSpeed = Options.SpeedEnabled.Value and Options.WalkSpeed.Value or defaults.WalkSpeed
-    hum.UseJumpPower = true
-    hum.JumpPower = Options.JumpEnabled.Value and Options.JumpPower.Value or defaults.JumpPower
+    if original.hum ~= hum then
+        original = { hum = hum, WalkSpeed = hum.WalkSpeed, JumpPower = hum.JumpPower, UseJumpPower = hum.UseJumpPower }
+    end
+    if Options.SpeedEnabled.Value then
+        original.speedSet = true
+        hum.WalkSpeed = Options.WalkSpeed.Value
+    elseif original.speedSet then
+        original.speedSet = false
+        hum.WalkSpeed = original.WalkSpeed
+    end
+    if Options.JumpEnabled.Value then
+        original.jumpSet = true
+        hum.UseJumpPower = true
+        hum.JumpPower = Options.JumpPower.Value
+    elseif original.jumpSet then
+        original.jumpSet = false
+        hum.UseJumpPower = original.UseJumpPower
+        hum.JumpPower = original.JumpPower
+    end
 end
 for _, id in ipairs({ "SpeedEnabled", "WalkSpeed", "JumpEnabled", "JumpPower" }) do
     Options[id]:OnChanged(applyStats)
@@ -284,8 +301,21 @@ track(Players.PlayerRemoving:Connect(function(plr)
 end))
 
 local World = Tabs.Visuals:AddSection("World")
+World:AddToggle("FOVEnabled", { Title = "Custom Field of View", Default = false })
 World:AddSlider("FOV", { Title = "Field of View", Min = 30, Max = 120, Default = 70, Increment = 1, Suffix = "°" })
-Options.FOV:OnChanged(function(v) Workspace.CurrentCamera.FieldOfView = v end)
+local originalFov
+local function applyFov()
+    local cam = Workspace.CurrentCamera
+    if Options.FOVEnabled.Value then
+        originalFov = originalFov or cam.FieldOfView
+        cam.FieldOfView = Options.FOV.Value
+    elseif originalFov then
+        cam.FieldOfView = originalFov
+        originalFov = nil
+    end
+end
+Options.FOVEnabled:OnChanged(applyFov)
+Options.FOV:OnChanged(applyFov)
 
 ---------------------------------------------------------------- Misc
 local Tp = Tabs.Misc:AddSection("Teleport")
@@ -343,10 +373,14 @@ task.spawn(function()
     stopFly()
     if fovCircle then pcall(function() fovCircle:Remove() end) end
     local hum = getHumanoid()
-    if hum then
-        hum.WalkSpeed = defaults.WalkSpeed
-        hum.JumpPower = defaults.JumpPower
+    if hum and original.hum == hum then
+        if original.speedSet then hum.WalkSpeed = original.WalkSpeed end
+        if original.jumpSet then
+            hum.UseJumpPower = original.UseJumpPower
+            hum.JumpPower = original.JumpPower
+        end
     end
+    if originalFov then Workspace.CurrentCamera.FieldOfView = originalFov end
 end)
 
 ---------------------------------------------------------------- Settings
