@@ -34,6 +34,7 @@ local Window = Fluent:CreateWindow({
 
 local Tabs = {
     Player = Window:AddTab({ Title = "Player", Icon = "user" }),
+    Aim = Window:AddTab({ Title = "Aim", Icon = "crosshair" }),
     Visuals = Window:AddTab({ Title = "Visuals", Icon = "eye" }),
     Misc = Window:AddTab({ Title = "Misc", Icon = "wrench" }),
     Settings = Window:AddTab({ Title = "Settings", Icon = "settings" }),
@@ -132,6 +133,107 @@ track(RunService.RenderStepped:Connect(function()
     if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir -= Vector3.yAxis end
     flyVel.Velocity = dir.Magnitude > 0 and dir.Unit * Options.FlySpeed.Value or Vector3.zero
     flyGyro.CFrame = cam.CFrame
+end))
+
+---------------------------------------------------------------- Aim
+local AimMain = Tabs.Aim:AddSection("Aimbot")
+AimMain:AddToggle("AimEnabled", { Title = "Aimbot", Description = "Aims while the key is active", Default = false })
+AimMain:AddKeybind("AimKey", { Title = "Aim Key", Mode = "Hold", Default = "MouseRight" })
+AimMain:AddDropdown("AimPart", { Title = "Target Part", Values = { "Head", "HumanoidRootPart", "UpperTorso" }, Multi = false, Default = 1 })
+AimMain:AddSlider("AimSmooth", {
+    Title = "Smoothness", Description = "1 = instant snap, higher = slower",
+    Min = 1, Max = 20, Default = 5, Increment = 0.5,
+})
+AimMain:AddSlider("AimMaxDist", { Title = "Max Distance", Min = 50, Max = 2000, Default = 500, Increment = 50, Suffix = " studs" })
+
+local AimFilter = Tabs.Aim:AddSection("Filters")
+AimFilter:AddToggle("AimTeamCheck", { Title = "Ignore Teammates", Default = true })
+AimFilter:AddToggle("AimWallCheck", { Title = "Visible Only", Description = "Skip targets behind walls", Default = true })
+AimFilter:AddToggle("AimSticky", { Title = "Sticky Target", Description = "Stay on one target while holding", Default = true })
+
+local AimFov = Tabs.Aim:AddSection("FOV Circle")
+AimFov:AddSlider("AimFovRadius", { Title = "FOV Radius", Min = 20, Max = 600, Default = 120, Increment = 5, Suffix = " px" })
+AimFov:AddToggle("AimShowFov", { Title = "Show FOV Circle", Default = true })
+AimFov:AddColorpicker("AimFovColor", { Title = "Circle Color", Default = Color3.fromRGB(255, 255, 255) })
+
+local fovCircle
+pcall(function()
+    fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 1.5
+    fovCircle.NumSides = 64
+    fovCircle.Filled = false
+    fovCircle.Visible = false
+end)
+
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+local function isValidTarget(plr, part)
+    if plr == LocalPlayer or not part then return false end
+    local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+    if Options.AimTeamCheck.Value and plr.Team ~= nil and plr.Team == LocalPlayer.Team then return false end
+    local cam = Workspace.CurrentCamera
+    if (part.Position - cam.CFrame.Position).Magnitude > Options.AimMaxDist.Value then return false end
+    if Options.AimWallCheck.Value then
+        rayParams.FilterDescendantsInstances = { LocalPlayer.Character, plr.Character }
+        local origin = cam.CFrame.Position
+        if Workspace:Raycast(origin, part.Position - origin, rayParams) then return false end
+    end
+    return true
+end
+
+local function getAimPart(plr)
+    local char = plr.Character
+    if not char then return nil end
+    return char:FindFirstChild(Options.AimPart.Value)
+        or char:FindFirstChild("Head")
+        or char:FindFirstChild("HumanoidRootPart")
+end
+
+local function screenDistance(part)
+    local cam = Workspace.CurrentCamera
+    local pos, onScreen = cam:WorldToViewportPoint(part.Position)
+    if not onScreen then return math.huge end
+    return (Vector2.new(pos.X, pos.Y) - UserInputService:GetMouseLocation()).Magnitude
+end
+
+local currentTarget
+local function findTarget()
+    local best, bestDist = nil, Options.AimFovRadius.Value
+    for _, plr in ipairs(Players:GetPlayers()) do
+        local part = getAimPart(plr)
+        if isValidTarget(plr, part) then
+            local d = screenDistance(part)
+            if d < bestDist then best, bestDist = plr, d end
+        end
+    end
+    return best
+end
+
+track(RunService.RenderStepped:Connect(function(dt)
+    local cam = Workspace.CurrentCamera
+    if fovCircle then
+        fovCircle.Visible = Options.AimEnabled.Value and Options.AimShowFov.Value
+        fovCircle.Radius = Options.AimFovRadius.Value
+        fovCircle.Color = Options.AimFovColor.Value
+        fovCircle.Position = UserInputService:GetMouseLocation()
+    end
+
+    if not (Options.AimEnabled.Value and Options.AimKey:GetState()) then
+        currentTarget = nil
+        return
+    end
+
+    if not (Options.AimSticky.Value and currentTarget and isValidTarget(currentTarget, getAimPart(currentTarget))) then
+        currentTarget = findTarget()
+    end
+    local part = currentTarget and getAimPart(currentTarget)
+    if not part then return end
+
+    local goal = CFrame.lookAt(cam.CFrame.Position, part.Position)
+    local alpha = math.clamp(dt * 60 / Options.AimSmooth.Value, 0, 1)
+    cam.CFrame = cam.CFrame:Lerp(goal, alpha)
 end))
 
 ---------------------------------------------------------------- Visuals
@@ -239,6 +341,7 @@ task.spawn(function()
     repeat task.wait(1) until Fluent.Unloaded
     for _, c in ipairs(connections) do c:Disconnect() end
     stopFly()
+    if fovCircle then pcall(function() fovCircle:Remove() end) end
     local hum = getHumanoid()
     if hum then
         hum.WalkSpeed = defaults.WalkSpeed
