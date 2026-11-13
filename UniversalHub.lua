@@ -27,7 +27,7 @@ local Window = Fluent:CreateWindow({
     SubTitle = "Fluent-Custom",
     TabWidth = 160,
     Size = UDim2.fromOffset(580, 460),
-    Acrylic = true,
+    Acrylic = false, -- blur crashes many executors
     Theme = "Dark",
     MinimizeKey = Enum.KeyCode.LeftControl,
 })
